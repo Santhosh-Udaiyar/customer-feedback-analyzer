@@ -126,14 +126,15 @@ class FeedbackAnalyzer:
             top_neg_issue = neg_issues[0]
             neg_share = round((top_neg_issue["negative"] / max(1, neg_count)) * 100, 1)
             insights.append(
-                f"⚠️ **Primary Source of Friction:** **{top_neg_issue['category']}** is the leading customer pain point, "
-                f"appearing in **{top_neg_issue['negative']} negative reviews** ({neg_share}% of all negative feedback)."
+                f"• **Negative feedback is concentrated around {top_neg_issue['category']}:** "
+                f"Appears in **{top_neg_issue['negative']} negative reviews** ({neg_share}% of all negative feedback)."
             )
             if len(neg_issues) > 1:
                 second_neg = neg_issues[1]
+                sec_share = round((second_neg["negative"] / max(1, neg_count)) * 100, 1)
                 insights.append(
-                    f"📌 **Secondary Concern:** **{second_neg['category']}** also accounts for "
-                    f"**{second_neg['negative']} negative reviews**."
+                    f"• **{second_neg['category']} appears in a significant portion of negative feedback:** "
+                    f"Mentioned in **{second_neg['negative']} negative reviews** ({sec_share}% of negative feedback)."
                 )
 
         # 3. Bright spots / positive drivers
@@ -145,15 +146,16 @@ class FeedbackAnalyzer:
         if pos_issues:
             top_pos_issue = pos_issues[0]
             insights.append(
-                f"🏆 **Primary Value Driver:** **{top_pos_issue['category']}** received the strongest praise, "
-                f"with **{top_pos_issue['positive']} positive mentions**."
+                f"• **{top_pos_issue['category']} is frequently mentioned in positive reviews:** "
+                f"Received the highest praise with **{top_pos_issue['positive']} positive mentions**."
             )
 
         # 4. Neutral / Passive customer segment
         if neu_pct >= 20:
             insights.append(
-                f"🔍 **Passive Customer Opportunity:** **{neu_pct}%** of feedback is neutral, "
+                f"• **Passive customer opportunity:** **{neu_pct}%** of feedback is neutral, "
                 f"representing an opportunity for proactive engagement before potential customer churn."
             )
 
         return insights
+

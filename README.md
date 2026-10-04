@@ -174,24 +174,28 @@ directly from the analyzed data without synthetic numbers.
 ```text
 customer-feedback-analyzer/
 │
-├── app.py                             # Main Streamlit application
+├── app.py                             # Main Streamlit web application
 ├── 05_customer_feedback_analyzer.py   # Application entry point script
 │
 ├── src/                               # Modular NLP Package
 │   ├── __init__.py                    # Module export declarations
-│   ├── preprocessing.py               # Text cleaning, normalization, stopwords
+│   ├── preprocessing.py               # Text cleaning, normalization, negation-preserving stopwords
 │   ├── sentiment.py                   # VADER sentiment scoring and threshold mapping
 │   ├── keyword_extractor.py           # TF-IDF unigram & bigram phrase extraction
-│   ├── issue_detector.py              # Operational issue taxonomy & cross-tabulation
-│   └── analyzer.py                    # End-to-end pipeline orchestrator & insights
+│   ├── keyword_extraction.py          # Unified alias interface for keyword extraction
+│   ├── issue_detector.py              # Operational issue taxonomy & aspect cross-tabulation
+│   ├── issue_analysis.py              # Unified alias interface for issue analysis
+│   ├── data_processing.py             # CSV ingestion, auto-column detection & data validation
+│   └── analyzer.py                    # End-to-end pipeline orchestrator & business insights
 │
 ├── data/
 │   └── sample_feedback.csv            # 25 realistic demonstration reviews
+├── sample_customer_reviews.csv        # 30 multi-channel customer reviews
 │
 ├── tests/
-│   └── test_nlp_pipeline.py           # Unit and integration test suite
+│   └── test_nlp_pipeline.py           # Comprehensive unit and integration test suite
 │
-├── requirements.txt                   # Production dependencies
+├── requirements.txt                   # Verified production dependencies
 ├── README.md                          # Comprehensive documentation & Viva guide
 └── .gitignore                         # Standard Python & Streamlit exclusions
 ```
@@ -308,16 +312,29 @@ python -m unittest tests/test_nlp_pipeline.py
 
 ---
 
-## 16. Future Enhancements
+## 16. Limitations
 
-- [ ] **Multilingual Sentiment Analysis:** Integration with XLM-RoBERTa for cross-lingual customer reviews.
-- [ ] **Aspect-Based Sentiment Analysis (ABSA):** Assign separate sentiment polarities to different aspects within a single sentence (e.g., *Positive* for Quality, *Negative* for Delivery).
-- [ ] **Transformer-Based Embeddings:** Sentence-Transformers for semantic similarity clustering of open-ended complaints.
-- [ ] **RAG-Powered Feedback Querying:** Retrieval-Augmented Generation allowing managers to chat with customer review repositories.
-- [ ] **Real-Time Webhook Ingestion:** Ingest feedback directly from Zendesk, Freshdesk, and Google Play Store APIs.
+Being transparent about system limitations is essential for academic evaluation and production considerations:
+- **Lexicon-Based Sentiment Constraints:** VADER relies on a predefined sentiment lexicon. While highly effective on typical consumer vocabulary, it may misinterpret domain-specific jargon or technical terminology.
+- **Sarcasm and Irony:** Subtly sarcastic statements (e.g., *"Oh fantastic, my order arrived two months late."*) may register as positive due to words like *"fantastic"*, unless caught by context.
+- **Mixed-Polarity Sentences:** Reviews containing both high praise and sharp criticism in one sentence (e.g., *"The build quality is incredible, but customer support was absolutely abysmal."*) yield a composite compound score that may average out into neutral or mild polarity rather than recognizing both extremes distinctly.
+- **Predefined Issue Taxonomy:** Issue categories (*Product Quality, Delivery, Customer Support, etc.*) are rule-assisted aspect categories based on curated keyword patterns. While completely explainable and transparent, novel topics outside these vocabularies are reported as unclassified rather than dynamically discovered via unsupervised clustering.
+- **Language Scope:** The current implementation is strictly optimized for English customer feedback text.
 
 ---
 
-## 17. License
+## 17. Future Enhancements
+
+Potential future improvements:
+- [ ] **Multilingual Feedback Analysis:** Integration with XLM-RoBERTa or multilingual sentiment lexicons for non-English customer reviews.
+- [ ] **Aspect-Based Sentiment Analysis (ABSA):** Assign separate sentiment polarities to distinct aspects within a single sentence (e.g., *Positive* for Quality, *Negative* for Delivery).
+- [ ] **Transformer-Based Sentiment Models:** Fine-tuned RoBERTa/DeBERTa models for deeper semantic and sarcastic nuances.
+- [ ] **Automatic Topic Modelling:** Unsupervised LDA or BERTopic clustering for detecting emerging, uncatalogued customer topics.
+- [ ] **Real-Time Feedback Ingestion:** Ingest feedback directly from Zendesk, Freshdesk, and app store APIs.
+
+---
+
+## 18. License
 
 This project is licensed under the [MIT License](LICENSE).
+

@@ -2,7 +2,7 @@
 Customer Feedback Analyzer
 --------------------------
 Streamlit Application for Natural Language Processing of Customer Feedback.
-Supports Single Feedback Analysis and Batch CSV Dataset Processing.
+Supports Individual Feedback Analysis and Batch CSV Dataset Processing.
 
 Run using:
     streamlit run app.py
@@ -22,11 +22,17 @@ from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 
 # Modular NLP package imports
-from src.preprocessing import clean_text
+from src.preprocessing import clean_text, preprocess_feedback, tokenize_and_remove_stopwords, NEGATION_WORDS
 from src.sentiment import analyze_sentiment
 from src.keyword_extractor import extract_keywords_single, extract_keywords_corpus
 from src.issue_detector import detect_issues_single, analyze_issues_dataset, ISSUE_CATEGORIES
 from src.analyzer import FeedbackAnalyzer
+from src.data_processing import (
+    detect_feedback_column,
+    detect_date_column,
+    validate_and_clean_dataset,
+    prepare_download_dataframe,
+)
 
 
 # ---------------------------------------------------------
@@ -178,6 +184,23 @@ html, body, [class*="css"] {
     color: #e2e8f0;
     font-size: 0.95rem;
 }
+
+/* Validation Banner */
+.val-banner {
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 12px 18px;
+    margin-bottom: 18px;
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    font-size: 0.9rem;
+    color: #94a3b8;
+}
+.val-item strong {
+    color: #f8fafc;
+}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -195,8 +218,8 @@ st.sidebar.markdown("""
 
 st.sidebar.markdown("---")
 app_mode = st.sidebar.radio(
-    "Application Mode:",
-    ["Mode 1 — Analyze Feedback", "Mode 2 — Analyze Dataset", "📖 Project Documentation & Viva Guide"],
+    "Choose Input / Mode:",
+    ["Individual Feedback", "Upload CSV / Batch Analysis", "📖 Project Documentation & Viva Guide"],
     index=0
 )
 
@@ -229,15 +252,15 @@ analyzer = FeedbackAnalyzer(pos_threshold=pos_thresh, neg_threshold=neg_thresh)
 st.markdown("""
 <div class="header-box">
     <h1 class="header-title">Customer Feedback Analyzer</h1>
-    <p class="header-subtitle">Turn customer feedback into actionable insights using NLP.</p>
+    <p class="header-subtitle">Analyze customer feedback using NLP and sentiment analysis.</p>
 </div>
 """, unsafe_allow_html=True)
 
 
 # =========================================================
-# MODE 1 — ANALYZE FEEDBACK (Individual Feedback)
+# MODE 1 — INDIVIDUAL FEEDBACK
 # =========================================================
-if app_mode == "Mode 1 — Analyze Feedback":
+if app_mode == "Individual Feedback":
     st.markdown("### 📝 Individual Feedback Analysis")
     st.markdown("Enter customer feedback to evaluate sentiment, extract salient keywords, and identify operational concerns in real time.")
 
@@ -247,14 +270,14 @@ if app_mode == "Mode 1 — Analyze Feedback":
     preset_choice = None
     
     with col_p1:
-        if st.button("⚖️ Mixed / Complex Feedback", use_container_width=True):
-            preset_choice = "The product quality is excellent, but the delivery was very slow and customer support did not respond."
+        if st.button("⚖️ Quality & Slow Delivery", use_container_width=True):
+            preset_choice = "The product quality is good but delivery took too long."
     with col_p2:
-        if st.button("🌟 Positive Praise", use_container_width=True):
+        if st.button("🌟 Positive Customer Service", use_container_width=True):
             preset_choice = "Outstanding customer service! The representative resolved my billing question within minutes. Highly recommended!"
     with col_p3:
-        if st.button("🚨 Critical Bug & Defect", use_container_width=True):
-            preset_choice = "Terrible build quality. The plastic casing arrived broken and cracked. The app also keeps crashing on checkout!"
+        if st.button("🚨 Broken Part & Defect", use_container_width=True):
+            preset_choice = "The product is not good. The plastic casing arrived broken and cracked, and the app keeps crashing on checkout!"
     with col_p4:
         if st.button("💳 Billing & Cost Complaint", use_container_width=True):
             preset_choice = "Way overpriced for what you get. Got charged twice on my credit card and nobody in billing answered my emails."
@@ -264,13 +287,13 @@ if app_mode == "Mode 1 — Analyze Feedback":
 
     default_text = st.session_state.get(
         "single_input",
-        "The product quality is excellent, but the delivery was very slow and customer support did not respond."
+        "The product quality is good but delivery took too long."
     )
 
     feedback_text = st.text_area(
         "Customer Feedback:",
         value=default_text,
-        height=130,
+        height=120,
         placeholder="Enter or paste customer feedback here..."
     )
 
@@ -279,17 +302,21 @@ if app_mode == "Mode 1 — Analyze Feedback":
         analyze_clicked = st.button("🔍 Analyze Feedback", type="primary", use_container_width=True)
 
     if analyze_clicked or "single_result" in st.session_state:
-        # Error handling for empty or too short input
-        if not feedback_text.strip():
-            st.error("⚠️ Please enter customer feedback to analyze. Feedback text cannot be empty.")
+        # Error handling for empty or whitespace-only input
+        if not feedback_text or not feedback_text.strip():
+            st.error("Please enter customer feedback before analyzing.")
         elif len(feedback_text.strip()) < 3:
             st.warning("⚠️ The entered feedback is too short to produce meaningful NLP analysis. Please enter at least 3 characters.")
         else:
             with st.spinner("Analyzing feedback through NLP pipeline..."):
                 res = analyzer.analyze_single(feedback_text, top_keywords=num_keywords)
+                # Compute preprocessing pipeline step-by-step
+                prep_stages = preprocess_feedback(feedback_text)
                 st.session_state["single_result"] = res
+                st.session_state["single_prep"] = prep_stages
 
             res = st.session_state["single_result"]
+            prep_stages = st.session_state.get("single_prep", {})
             st.markdown("<br>", unsafe_allow_html=True)
 
             res_col1, res_col2 = st.columns([1, 1])
@@ -313,7 +340,7 @@ if app_mode == "Mode 1 — Analyze Feedback":
                         <div style="font-size: 0.8rem; color: #64748b;">Scale: -1.00 (most negative) to +1.00 (most positive)</div>
                     </div>
                     <div style="font-size: 0.85rem; color: #cbd5e1; background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 6px;">
-                        💡 <strong>Explanation:</strong> {res['explanation']}
+                        💡 <strong>Score Interpretation:</strong> {res['explanation']}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -380,17 +407,52 @@ if app_mode == "Mode 1 — Analyze Feedback":
                     """, unsafe_allow_html=True)
 
                 st.caption(
-                    "⚠️ *Note: Issue categories are identified using transparent lexical aspect patterns. "
-                    "Certainty is not claimed when the NLP model does not detect explicit topic markers.*"
+                    "⚠️ *Note: Issue categories are identified using transparent lexical aspect patterns based on actual feedback words.*"
                 )
 
+            # Basic Interpretation Summary
+            st.markdown("---")
+            st.markdown("#### 📋 Basic Feedback Interpretation")
+            interp_col1, interp_col2 = st.columns(2)
+            with interp_col1:
+                status_text = "Satisfied" if sent == "Positive" else ("Dissatisfied" if sent == "Negative" else "Neutral / Mixed")
+                st.markdown(f"**Customer Stance:** `{status_text}`")
+                if res["detected_issues"]:
+                    detected_str = ", ".join([f"{i['icon']} {i['category']}" for i in res["detected_issues"]])
+                    st.markdown(f"**Topics Discussed:** {detected_str}")
+                else:
+                    st.markdown("**Topics Discussed:** General customer feedback")
+            with interp_col2:
+                if res["keywords"]:
+                    st.markdown(f"**Core Subject Matter:** `{', '.join(res['keywords'][:4])}`")
+                if sent == "Positive":
+                    st.markdown("**Key Takeaway:** Customer expresses positive evaluation and satisfaction.")
+                elif sent == "Negative":
+                    st.markdown("**Key Takeaway:** Customer raises dissatisfaction or friction points requiring operational attention.")
+                else:
+                    st.markdown("**Key Takeaway:** Feedback contains balanced or neutral remarks without extreme polarity.")
+
+            # Preprocessing Pipeline Breakdown (Viva / Educational inspection)
+            with st.expander("🔬 View NLP Preprocessing Pipeline Breakdown"):
+                st.markdown("""
+                Demonstrates how raw text is systematically cleaned, normalized, tokenized, and filtered while preserving crucial negation words:
+                """)
+                st.json({
+                    "1. Raw Feedback": prep_stages.get("raw_text", ""),
+                    "2. Cleaned Surface (URLs & HTML stripped)": prep_stages.get("cleaned_surface", ""),
+                    "3. Normalized Text (Lowercased & Punctuation stripped)": prep_stages.get("normalized_text", ""),
+                    "4. All Tokens": prep_stages.get("tokens", []),
+                    "5. Filtered Tokens (Stopwords removed, negations preserved)": prep_stages.get("filtered_tokens", []),
+                    "6. Clean Text Output": prep_stages.get("clean_text", "")
+                })
+
 
 # =========================================================
-# MODE 2 — ANALYZE DATASET (CSV Batch Processing)
+# MODE 2 — CSV BATCH ANALYSIS
 # =========================================================
-elif app_mode == "Mode 2 — Analyze Dataset":
+elif app_mode == "Upload CSV / Batch Analysis":
     st.markdown("### 📁 Batch Feedback Dataset Analysis")
-    st.markdown("Upload a CSV file containing customer reviews or explore our pre-built demonstration dataset.")
+    st.markdown("Upload a CSV containing customer reviews or load a pre-built sample dataset for instant analysis.")
 
     col_up, col_btn_sample = st.columns([3, 2])
 
@@ -398,12 +460,15 @@ elif app_mode == "Mode 2 — Analyze Dataset":
         uploaded_file = st.file_uploader(
             "Upload CSV feedback file:",
             type=["csv", "tsv", "txt"],
-            help="Upload a CSV with customer reviews/feedback."
+            help="Upload a CSV with customer feedback/reviews."
         )
 
     with col_btn_sample:
         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        use_sample = st.button("🚀 Load Pre-built Sample Dataset (25 Reviews)", use_container_width=True)
+        sample_choice = st.selectbox(
+            "Or load sample demonstration dataset:",
+            ["None", "sample_feedback.csv (25 reviews)", "sample_customer_reviews.csv (30 reviews)"]
+        )
 
     raw_df = None
     data_source_title = ""
@@ -411,7 +476,6 @@ elif app_mode == "Mode 2 — Analyze Dataset":
     # Load from upload or sample dataset
     if uploaded_file is not None:
         try:
-            # Handle potential encoding issues (UTF-8, Latin-1)
             content = uploaded_file.read()
             uploaded_file.seek(0)
             try:
@@ -425,17 +489,27 @@ elif app_mode == "Mode 2 — Analyze Dataset":
             st.error(f"❌ Could not read the uploaded CSV file: {str(e)}")
             raw_df = None
 
-    elif use_sample or "active_batch_df" not in st.session_state:
-        sample_file_path = os.path.join(os.getcwd(), "data", "sample_feedback.csv")
-        if os.path.exists(sample_file_path):
+    elif sample_choice != "None" or "active_batch_df" not in st.session_state:
+        target_csv = "sample_feedback.csv" if "25" in sample_choice or sample_choice == "None" else "sample_customer_reviews.csv"
+        paths_to_check = [
+            os.path.join(os.getcwd(), "data", target_csv),
+            os.path.join(os.getcwd(), target_csv),
+            os.path.join(os.getcwd(), "data", "sample_feedback.csv")
+        ]
+        sample_file_path = None
+        for p in paths_to_check:
+            if os.path.exists(p):
+                sample_file_path = p
+                break
+
+        if sample_file_path and os.path.exists(sample_file_path):
             raw_df = pd.read_csv(sample_file_path)
-            data_source_title = "sample_feedback.csv (Demonstration Dataset)"
-            st.info("Loaded pre-built demonstration dataset (25 realistic customer reviews).")
+            data_source_title = f"{os.path.basename(sample_file_path)} (Demo Dataset)"
+            st.info(f"Loaded demo dataset: `{os.path.basename(sample_file_path)}` ({len(raw_df)} reviews).")
         else:
-            st.warning("Sample dataset not found at `data/sample_feedback.csv`. Please upload a CSV.")
+            st.warning("Sample dataset not found. Please upload a CSV file.")
 
     if raw_df is not None:
-        # Data validation
         if raw_df.empty:
             st.error("❌ The selected dataset is empty (0 rows). Please upload a valid CSV with data.")
         else:
@@ -445,19 +519,13 @@ elif app_mode == "Mode 2 — Analyze Dataset":
     if "active_batch_df" in st.session_state and not st.session_state["active_batch_df"].empty:
         batch_df = st.session_state["active_batch_df"].copy()
 
-        # Feedback Column Detection
-        target_candidates = ["feedback", "review", "comment", "text", "review_text", "message", "opinion"]
-        detected_col = None
-        for col in batch_df.columns:
-            if col.strip().lower() in target_candidates:
-                detected_col = col
-                break
+        # Intelligently identify feedback column
+        detected_col = detect_feedback_column(batch_df.columns.tolist())
         if not detected_col:
-            for col in batch_df.columns:
-                if any(c in col.strip().lower() for c in target_candidates):
-                    detected_col = col
-                    break
-        default_index = batch_df.columns.get_loc(detected_col) if detected_col else 0
+            st.warning("No suitable feedback column was detected. Please select the correct text column.")
+            default_index = 0
+        else:
+            default_index = batch_df.columns.get_loc(detected_col)
 
         col_col_select, col_run_btn = st.columns([3, 2])
         with col_col_select:
@@ -474,9 +542,8 @@ elif app_mode == "Mode 2 — Analyze Dataset":
 
         # Trigger Analysis or Check Cache
         if run_batch_nlp or "analyzed_batch_df" not in st.session_state or st.session_state.get("last_processed_col") != selected_text_col:
-            # Drop null or completely empty rows in selected column
-            clean_df = batch_df.dropna(subset=[selected_text_col]).copy()
-            clean_df = clean_df[clean_df[selected_text_col].astype(str).str.strip() != ""]
+            # Perform dataset validation and cleaning
+            clean_df, val_summary = validate_and_clean_dataset(batch_df, selected_text_col)
 
             if clean_df.empty:
                 st.error("❌ All records in the selected column are empty or null.")
@@ -489,10 +556,23 @@ elif app_mode == "Mode 2 — Analyze Dataset":
                     )
                     st.session_state["analyzed_batch_df"] = analyzed_res_df
                     st.session_state["last_processed_col"] = selected_text_col
+                    st.session_state["val_summary"] = val_summary
                     st.success(f"Analyzed {len(analyzed_res_df)} feedback records successfully!")
 
         if "analyzed_batch_df" in st.session_state:
             df_analyzed = st.session_state["analyzed_batch_df"]
+            val_summary = st.session_state.get("val_summary", {})
+
+            # DATA VALIDATION SUMMARY BANNER (Requirement 17)
+            if val_summary:
+                st.markdown(f"""
+                <div class="val-banner">
+                    <span class="val-item">📋 <strong>Rows analyzed:</strong> {val_summary['rows_analyzed']:,}</span>
+                    <span class="val-item">🧹 <strong>Empty feedback removed:</strong> {val_summary['empty_rows_removed']}</span>
+                    <span class="val-item">🔄 <strong>Duplicates detected:</strong> {val_summary['duplicates_detected']}</span>
+                    <span class="val-item">📁 <strong>Available columns:</strong> {', '.join(val_summary['columns'][:6])}{'...' if len(val_summary['columns']) > 6 else ''}</span>
+                </div>
+                """, unsafe_allow_html=True)
 
             # Compute Dataset Overview Statistics
             total_records = len(df_analyzed)
@@ -515,7 +595,6 @@ elif app_mode == "Mode 2 — Analyze Dataset":
             # ---------------------------------------------------------
             # Overview KPI Cards
             # ---------------------------------------------------------
-            st.markdown("<br>", unsafe_allow_html=True)
             kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 
             with kpi1:
@@ -567,9 +646,9 @@ elif app_mode == "Mode 2 — Analyze Dataset":
             st.markdown("<br>", unsafe_allow_html=True)
 
             # ---------------------------------------------------------
-            # Dynamic Feedback Insights
+            # Dynamic Feedback Insights (Requirement 12)
             # ---------------------------------------------------------
-            st.markdown("#### 💡 Data-Driven Business Insights")
+            st.markdown("#### 💡 Customer Feedback Insights (Calculated from Data)")
             insights_list = analyzer.generate_insights(df_analyzed, issues_aggregated)
             for ins in insights_list:
                 st.markdown(f"<div class='insight-box'>{ins}</div>", unsafe_allow_html=True)
@@ -580,27 +659,27 @@ elif app_mode == "Mode 2 — Analyze Dataset":
             # Dashboard Tabs: Visualizations, Issues, Keywords, Explorer
             # ---------------------------------------------------------
             d_tab1, d_tab2, d_tab3, d_tab4 = st.tabs([
-                "📊 Sentiment Charts",
+                "📊 Sentiment Charts & Trends",
                 "🚨 Customer Issue Analysis",
                 "🔑 Top Keywords & Word Cloud",
                 "📋 Data Explorer & Export"
             ])
 
-            # TAB 1: SENTIMENT CHARTS
+            # TAB 1: SENTIMENT CHARTS & TRENDS
             with d_tab1:
                 chart_col1, chart_col2 = st.columns(2)
+                color_mapping = {
+                    "Positive": "#10b981",
+                    "Neutral": "#f59e0b",
+                    "Negative": "#ef4444"
+                }
 
                 with chart_col1:
-                    # Sentiment Distribution Pie/Donut Chart
+                    # Sentiment Distribution Donut Chart
                     sent_df = pd.DataFrame({
                         "Sentiment": ["Positive", "Neutral", "Negative"],
                         "Count": [pos_records, neu_records, neg_records]
                     })
-                    color_mapping = {
-                        "Positive": "#10b981",
-                        "Neutral": "#f59e0b",
-                        "Negative": "#ef4444"
-                    }
 
                     fig_pie = px.pie(
                         sent_df,
@@ -647,6 +726,75 @@ elif app_mode == "Mode 2 — Analyze Dataset":
                         bargap=0.1
                     )
                     st.plotly_chart(fig_dist, use_container_width=True)
+
+                # Sentiment Trend over Time (Requirement 11)
+                date_column_found = detect_date_column(df_analyzed)
+                if date_column_found:
+                    st.markdown("---")
+                    st.markdown(f"#### 📈 Sentiment Trend Over Time (Detected Date Column: `{date_column_found}`)")
+                    try:
+                        trend_df = df_analyzed.copy()
+                        trend_df["parsed_date"] = pd.to_datetime(trend_df[date_column_found], errors="coerce")
+                        trend_df = trend_df.dropna(subset=["parsed_date"])
+
+                        if len(trend_df) >= 3:
+                            trend_summary = trend_df.groupby(trend_df["parsed_date"].dt.date).agg(
+                                avg_score=("Sentiment_Score", "mean"),
+                                total_reviews=("Sentiment_Score", "count"),
+                                positive_count=("Sentiment", lambda s: (s == "Positive").sum()),
+                                neutral_count=("Sentiment", lambda s: (s == "Neutral").sum()),
+                                negative_count=("Sentiment", lambda s: (s == "Negative").sum())
+                            ).reset_index().sort_values("parsed_date")
+
+                            t_col1, t_col2 = st.columns([3, 2])
+                            with t_col1:
+                                fig_trend = go.Figure()
+                                fig_trend.add_trace(go.Scatter(
+                                    x=trend_summary["parsed_date"],
+                                    y=trend_summary["avg_score"],
+                                    mode="lines+markers",
+                                    name="Avg Sentiment Score",
+                                    line=dict(color="#818cf8", width=3),
+                                    marker=dict(size=8, color="#6366f1")
+                                ))
+                                fig_trend.add_hline(y=0.05, line_dash="dot", line_color="#10b981", annotation_text="Positive Threshold (+0.05)")
+                                fig_trend.add_hline(y=-0.05, line_dash="dot", line_color="#ef4444", annotation_text="Negative Threshold (-0.05)")
+                                fig_trend.update_layout(
+                                    title="<b>Average Sentiment Score Over Time</b>",
+                                    template="plotly_dark",
+                                    paper_bgcolor="rgba(0,0,0,0)",
+                                    plot_bgcolor="rgba(0,0,0,0)",
+                                    font=dict(family="Inter", size=12),
+                                    xaxis=dict(title="Date"),
+                                    yaxis=dict(title="Mean Compound Score", range=[-1.05, 1.05]),
+                                    margin=dict(t=50, b=30, l=20, r=20)
+                                )
+                                st.plotly_chart(fig_trend, use_container_width=True)
+
+                            with t_col2:
+                                fig_vol = px.bar(
+                                    trend_summary,
+                                    x="parsed_date",
+                                    y=["positive_count", "neutral_count", "negative_count"],
+                                    title="<b>Daily Feedback Volume by Sentiment</b>",
+                                    color_discrete_map={
+                                        "positive_count": "#10b981",
+                                        "neutral_count": "#f59e0b",
+                                        "negative_count": "#ef4444"
+                                    },
+                                    labels={"value": "Count", "variable": "Sentiment", "parsed_date": "Date"}
+                                )
+                                fig_vol.update_layout(
+                                    template="plotly_dark",
+                                    paper_bgcolor="rgba(0,0,0,0)",
+                                    plot_bgcolor="rgba(0,0,0,0)",
+                                    font=dict(family="Inter", size=12),
+                                    barmode="stack",
+                                    margin=dict(t=50, b=30, l=20, r=20)
+                                )
+                                st.plotly_chart(fig_vol, use_container_width=True)
+                    except Exception as e:
+                        st.info(f"Could not render time-trend for column `{date_column_found}`: {str(e)}")
 
             # TAB 2: CUSTOMER ISSUE ANALYSIS
             with d_tab2:
@@ -780,7 +928,7 @@ elif app_mode == "Mode 2 — Analyze Dataset":
                     selected_issue_filter = st.selectbox("Filter Issue Area:", options=issue_filter_options)
 
                 with f_c3:
-                    text_search = st.text_input("🔍 Search keyword in reviews:", "")
+                    text_search = st.text_input("🔍 Search feedback text:", "")
 
                 # Apply Filters
                 filtered = df_analyzed[df_analyzed["Sentiment"].isin(sent_selection)].copy()
@@ -795,8 +943,7 @@ elif app_mode == "Mode 2 — Analyze Dataset":
 
                 # Column selection for clean display
                 display_cols = [selected_text_col, "Sentiment", "Sentiment_Score", "Extracted_Keywords", "Detected_Issues"]
-                # Include original columns if present
-                for c in ["id", "customer_name", "date", "category"]:
+                for c in ["id", "Review_ID", "customer_name", "Customer_Name", "date", "Date", "category", "Rating"]:
                     if c in filtered.columns and c not in display_cols:
                         display_cols.insert(0, c)
 
@@ -815,14 +962,15 @@ elif app_mode == "Mode 2 — Analyze Dataset":
                     }
                 )
 
-                # Export Analyzed Dataset
+                # Export Analyzed Dataset (Requirement 14)
                 st.markdown("---")
+                download_df = prepare_download_dataframe(df_analyzed, selected_text_col)
                 csv_buffer = io.StringIO()
-                df_analyzed.to_csv(csv_buffer, index=False)
+                download_df.to_csv(csv_buffer, index=False)
                 csv_bytes = csv_buffer.getvalue().encode("utf-8")
 
                 st.download_button(
-                    label="📥 Download Analyzed Dataset (CSV)",
+                    label="📥 Download Analyzed Feedback",
                     data=csv_bytes,
                     file_name="analyzed_customer_feedback.csv",
                     mime="text/csv",
@@ -852,12 +1000,13 @@ elif app_mode == "📖 Project Documentation & Viva Guide":
 
         #### 3. Why Tokenization & Stopword Removal?
         - **Tokenization:** Breaks continuous text into individual words or meaningful tokens.
-        - **Stopword Removal:** Eliminates high-frequency grammatical glue words (`and`, `the`, `is`) that carry zero discriminatory sentiment value, reducing dimensionality and noise.
+        - **Stopword Removal:** Eliminates high-frequency grammatical glue words (`and`, `the`, `is`) that carry zero discriminatory sentiment value, reducing dimensionality.
+        - **Negation Handling:** Crucially, negation words such as `not`, `no`, and `never` are **preserved**, preventing semantic inversion (e.g. ensuring *"not good"* does not turn into *"good"*).
 
         #### 4. How does VADER Work?
         **VADER** (*Valence Aware Dictionary and sEntiment Reasoner*) is a rule-based lexicon explicitly tuned for consumer reviews and social text:
-        - It uses an empirically validated sentiment lexicon.
-        - Accounts for punctuation emphasis (e.g. `great!`), capitalization (`TERRIBLE`), degree adverbs (`extremely slow`), and contrastive conjunctions (`good, BUT slow`).
+        - Uses an empirically validated sentiment lexicon.
+        - Accounts for punctuation emphasis (`great!`), capitalization (`TERRIBLE`), degree adverbs (`extremely slow`), and contrastive conjunctions (`good, BUT slow`).
         """)
 
     with viva_col2:
@@ -890,19 +1039,17 @@ elif app_mode == "📖 Project Documentation & Viva Guide":
     st.code("""
 Customer Feedback
        ↓
-Text Cleaning (URLs, HTML, whitespace stripping)
+Data Validation (Row counting, duplicate detection, empty feedback stripping)
        ↓
-Tokenization & Normalization (Lowercasing, punctuation stripping)
+Text Preprocessing (Lowercasing, whitespace cleaning, punctuation handling, tokenization, stopword removal with negation preservation)
        ↓
-Stopword Removal (NLTK English + Domain noise suppression)
+Sentiment Analysis (VADER compound & component calculations)
        ↓
-Feature Extraction (TF-IDF N-grams & Lexical intensities)
+Keyword / Topic Analysis (TF-IDF & N-gram candidate ranking)
        ↓
-Sentiment Analysis (VADER compound & component calculation)
+Issue / Feedback Analysis (Aspect-based category mapping across 7 touchpoints)
        ↓
-Keyword & Keyphrase Extraction (Top TF-IDF terms)
+Visual Insights (Sentiment distribution, time trends, issue breakdowns, word clouds)
        ↓
-Aspect/Issue Detection (7 operational customer service categories)
-       ↓
-Actionable Insights Generation (Net Sentiment Score & Root causes)
+Downloadable Results (Enriched CSV export with original and analyzed columns)
     """, language="text")
